@@ -84,20 +84,34 @@ console.log("DB URL loaded:", process.env.DATABASE_URL); // Add this line for te
 
     // Create HTTP server and integrate Socket.IO
     const server = http.createServer(app);
+    console.log("📋 HTTP Server created");
+
     const io = new Server(server, {
       cors: {
         origin: process.env.FRONTEND_URL || "http://localhost:3000",
         methods: ["GET", "POST"],
       },
     });
+    console.log("📋 Socket.IO instance created:", !!io);
+    console.log("📋 Socket.IO methods:", Object.keys(io).join(", "));
 
     // Setup WebSocket connection handling
+    console.log("📋 About to call setupWebSocket...");
     setupWebSocket(io);
+    console.log("📋 setupWebSocket called");
+
+    // Add a test event to check if Socket.IO works
+    io.on("connection", (socket) => {
+      console.log(
+        "📋 Server-level connection handler received connection:",
+        socket.id
+      );
+    });
 
     // Only start server if database connected successfully
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
-      console.log(`WebSocket server initialized`);
+      console.log(`WebSocket server initialized and listening on port ${PORT}`);
     });
 
     module.exports = { app, server, io };

@@ -171,6 +171,21 @@ const verifyTipPayment = asyncHandler(async (req, res) => {
     "new_tip",
     alertPayload
   );
+  if (emitted) {
+    console.log(
+      `✅ Successfully emitted new_tip event for streamer: ${tip.streamerId}`
+    );
+  } else {
+    console.log(
+      `⚠️ No active WebSocket connections for streamer: ${tip.streamerId}`
+    );
+  }
+  res.json({
+    success: true,
+    message: "Payment verified successfully.",
+    tipId: tip._id,
+    paymentId: tip.paymentId,
+  });
   return;
   //TEMPORARY
 

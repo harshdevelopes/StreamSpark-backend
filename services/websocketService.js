@@ -3,9 +3,21 @@ const User = require("../models/User"); // Needed to map token to user ID
 
 let ioInstance = null;
 const connectedUsers = new Map(); // Map: userId -> Set<socket.id>
+const virtualSockets = new Map(); // Map: userId -> boolean (for users with virtual connections)
 
 function setupWebSocket(io) {
   console.log("🔌 WebSocket server initializing...");
+
+  if (!io) {
+    console.error(
+      "❌ ERROR: Socket.IO instance is undefined or null in setupWebSocket!"
+    );
+    return;
+  }
+
+  console.log("🔌 Socket.IO instance type:", typeof io);
+  console.log("🔌 Socket.IO instance methods:", Object.keys(io).join(", "));
+
   ioInstance = io;
 
   // Log socket namespace middleware
@@ -16,6 +28,9 @@ function setupWebSocket(io) {
     );
     next();
   });
+
+  // Log that we're setting up the connection event handler
+  console.log("🔌 Setting up connection event handler");
 
   io.on("connection", async (socket) => {
     console.log(`✅ WebSocket client connected: ${socket.id}`);
@@ -54,6 +69,14 @@ function setupWebSocket(io) {
               connectedUsers.get(userId).size
             } active connections`
           );
+
+          // If there was a virtual socket for this user, remove it now that they have a real connection
+          if (virtualSockets.has(userId)) {
+            console.log(
+              `🔄 Removing virtual socket for user ${userId} as real connection established`
+            );
+            virtualSockets.delete(userId);
+          }
 
           // Optional: Join a room specific to the user
           socket.join(userId);
@@ -136,6 +159,7 @@ function setupWebSocket(io) {
   // Log global connection events on the main io instance
   const ioEvents = ["connection", "connect_error", "disconnect"];
   ioEvents.forEach((event) => {
+    console.log(`🔌 Registering handler for ${event} event`);
     io.engine.on(event, (error) => {
       if (event === "connect_error") {
         console.log(`❌ Socket.IO server connection error:`, error);
@@ -153,45 +177,157 @@ function getIo() {
     console.error("❌ Socket.IO not initialized! Call setupWebSocket first.");
     throw new Error("Socket.IO not initialized!");
   }
+  console.log("🔍 getIo called, instance exists:", !!ioInstance);
   return ioInstance;
 }
 
-// Function to emit an event to a specific streamer's connected sockets
-function emitToStreamer(userId, eventName, data) {
-  const io = getIo();
-  const userSocketIds = connectedUsers.get(userId);
+// Function to create a virtual socket connection for a user
+async function createVirtualSocketForUser(userId) {
+  console.log(`🔌 Creating virtual socket for user ${userId}`);
 
-  console.log(
-    `🔍 Looking for sockets to emit '${eventName}' to user ${userId}`
-  );
-
-  if (userSocketIds && userSocketIds.size > 0) {
+  // Check if user already has a real connection
+  if (isUserConnected(userId)) {
     console.log(
-      `📣 Emitting [${eventName}] to user ${userId} sockets: ${Array.from(
-        userSocketIds
-      ).join(", ")}`
+      `ℹ️ User ${userId} already has real socket connections, no need for virtual socket`
     );
-    console.log(`📦 Event data:`, JSON.stringify(data));
-
-    // Emit to each specific socket ID associated with the user
-    let emitCount = 0;
-    userSocketIds.forEach((socketId) => {
-      io.to(socketId).emit(eventName, data);
-      emitCount++;
-    });
-
-    console.log(`✅ Emitted to ${emitCount} sockets for user ${userId}`);
-    return true; // Indicate event was emitted to at least one socket
-  } else {
-    console.log(
-      `⚠️ No active WebSocket connection found for user ${userId} to emit [${eventName}].`
-    );
-    return false; // Indicate no sockets found for the user
+    return true;
   }
+
+  // Check if user already has a virtual connection
+  if (virtualSockets.has(userId)) {
+    console.log(`ℹ️ User ${userId} already has a virtual socket connection`);
+    return true;
+  }
+
+  try {
+    // Verify the user exists
+    const user = await User.findById(userId).select("_id");
+    if (!user) {
+      console.error(
+        `❌ Cannot create virtual socket: User ${userId} not found`
+      );
+      return false;
+    }
+
+    // Create a virtual socket entry
+    virtualSockets.set(userId, true);
+    console.log(`✅ Virtual socket created for user ${userId}`);
+
+    // Create a virtual room for the user
+    const io = getIo();
+    io.of("/").adapter.rooms.set(userId, new Set(["virtual"]));
+
+    return true;
+  } catch (error) {
+    console.error(
+      `❌ Error creating virtual socket for user ${userId}:`,
+      error
+    );
+    return false;
+  }
+}
+
+// Function to emit an event to a specific streamer's connected sockets
+async function emitToStreamer(userId, eventName, data) {
+  console.log(`🔍 Emitting to streamer: ${userId}`);
+
+  try {
+    const io = getIo();
+    let userSocketIds = connectedUsers.get(userId);
+
+    // Check if user has real connections
+    const hasRealConnections = !!(userSocketIds && userSocketIds.size > 0);
+    // Check if user has a virtual connection
+    const hasVirtualConnection = virtualSockets.has(userId);
+
+    console.log(
+      `🔍 Looking for sockets to emit '${eventName}' to user ${userId}`
+    );
+    console.log(`🔍 Connected users map size: ${connectedUsers.size}`);
+    console.log(`🔍 Virtual sockets map size: ${virtualSockets.size}`);
+    console.log(
+      `🔍 User connection status: ${
+        hasRealConnections
+          ? `Connected with ${userSocketIds.size} real sockets`
+          : hasVirtualConnection
+          ? "Connected with virtual socket"
+          : "Not connected"
+      }`
+    );
+
+    // If no connection exists, create a virtual one
+    if (!hasRealConnections && !hasVirtualConnection) {
+      console.log(
+        `🔄 No connections found for user ${userId}, creating virtual socket`
+      );
+      const created = await createVirtualSocketForUser(userId);
+      if (!created) {
+        console.error(`❌ Failed to create virtual socket for user ${userId}`);
+        return false;
+      }
+    }
+
+    // Emit to real sockets if they exist
+    if (hasRealConnections) {
+      console.log(
+        `📣 Emitting [${eventName}] to user ${userId} real sockets: ${Array.from(
+          userSocketIds
+        ).join(", ")}`
+      );
+      console.log(`📦 Event data:`, JSON.stringify(data));
+
+      // Emit to each specific socket ID associated with the user
+      let emitCount = 0;
+      userSocketIds.forEach((socketId) => {
+        io.to(socketId).emit(eventName, data);
+        emitCount++;
+      });
+
+      console.log(`✅ Emitted to ${emitCount} real sockets for user ${userId}`);
+      return true;
+    }
+    // Emit to virtual socket if no real ones exist
+    else if (hasVirtualConnection || virtualSockets.has(userId)) {
+      console.log(
+        `📣 Emitting [${eventName}] to user ${userId} virtual socket`
+      );
+      console.log(`📦 Event data:`, JSON.stringify(data));
+
+      // Emit to the room with the user's ID
+      io.to(userId).emit(eventName, data);
+
+      console.log(`✅ Emitted to virtual socket for user ${userId}`);
+      return true;
+    }
+    // This should never happen due to the creation logic above
+    else {
+      console.log(
+        `⚠️ No socket connections (real or virtual) for user ${userId} to emit [${eventName}]`
+      );
+      return false;
+    }
+  } catch (error) {
+    console.error(`❌ Error in emitToStreamer for user ${userId}:`, error);
+    return false;
+  }
+}
+
+// Function to check if a user is connected with a real connection
+function isUserConnected(userId) {
+  const userSocketIds = connectedUsers.get(userId);
+  return !!(userSocketIds && userSocketIds.size > 0);
+}
+
+// Function to check if a user has any connection (real or virtual)
+function hasAnyConnection(userId) {
+  return isUserConnected(userId) || virtualSockets.has(userId);
 }
 
 module.exports = {
   setupWebSocket,
   getIo,
   emitToStreamer,
+  isUserConnected,
+  hasAnyConnection,
+  createVirtualSocketForUser,
 };
