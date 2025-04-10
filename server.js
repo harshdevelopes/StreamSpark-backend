@@ -8,9 +8,7 @@ if (!fs.existsSync(envPath)) {
   console.error("ERROR: .env file not found!");
   console.error(`Expected location: ${envPath}`);
   console.error("Please create a .env file with your environment variables");
-  console.error(
-    "Required variables: DATABASE_URL, JWT_SECRET, RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET"
-  );
+  console.error("Required variables: DATABASE_URL, JWT_SECRET, ");
   process.exit(1);
 }
 
@@ -35,11 +33,8 @@ if (missingVars.length > 0) {
 }
 
 const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
 const cors = require("cors");
 const connectDB = require("./config/db"); // Database connection logic (to be created)
-const { setupWebSocket } = require("./services/websocketService"); // WebSocket logic (to be created)
 const errorHandler = require("./middleware/errorHandler"); // Error handling middleware (to be created)
 const User = require("./models/User"); // <-- Import User model
 
@@ -82,39 +77,12 @@ console.log("DB URL loaded:", process.env.DATABASE_URL); // Add this line for te
     // Error Handling Middleware (Should be last)
     app.use(errorHandler);
 
-    // Create HTTP server and integrate Socket.IO
-    const server = http.createServer(app);
-    console.log("📋 HTTP Server created");
-
-    const io = new Server(server, {
-      cors: {
-        origin: process.env.FRONTEND_URL || "http://localhost:3000",
-        methods: ["GET", "POST"],
-      },
-    });
-    console.log("📋 Socket.IO instance created:", !!io);
-    console.log("📋 Socket.IO methods:", Object.keys(io).join(", "));
-
-    // Setup WebSocket connection handling
-    console.log("📋 About to call setupWebSocket...");
-    setupWebSocket(io);
-    console.log("📋 setupWebSocket called");
-
-    // Add a test event to check if Socket.IO works
-    io.on("connection", (socket) => {
-      console.log(
-        "📋 Server-level connection handler received connection:",
-        socket.id
-      );
-    });
-
-    // Only start server if database connected successfully
-    server.listen(PORT, () => {
+    // Start the Express server
+    app.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
-      console.log(`WebSocket server initialized and listening on port ${PORT}`);
     });
 
-    module.exports = { app, server, io };
+    module.exports = { app };
   } catch (error) {
     console.error("Failed to start server:", error.message);
     process.exit(1);
