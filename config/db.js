@@ -8,8 +8,8 @@ const connectDB = async () => {
       "mongodb+srv://harshdevelopes:iT1mYPiyKlx8Wgi3@cluster0mumbai.h7mtb0n.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0Mumbai",
       {
         // Options to avoid deprecation warnings (adjust as needed for your Mongoose version)
-        useNewUrlParser: true,
-        useUnifiedTopology: true,
+        // useNewUrlParser: true,
+        // useUnifiedTopology: true,
         // useCreateIndex: true, // May not be needed in newer Mongoose versions
         // useFindAndModify: false // May not be needed in newer Mongoose versions
       }

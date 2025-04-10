@@ -55,7 +55,7 @@ console.log("DB URL loaded:", process.env.DATABASE_URL); // Add this line for te
     await connectDB();
 
     const app = express();
-    const PORT = process.env.PORT || 5001;
+    const PORT = process.env.PORT || 8000;
 
     // Middleware
     app.use(
