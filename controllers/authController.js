@@ -2,6 +2,7 @@
 const User = require("../models/User");
 const asyncHandler = require("../middleware/asyncHandler");
 const generateToken = require("../utils/generateToken");
+const { verifyGoogleToken } = require("../utils/googleAuth");
 
 // @desc    Register a new user/streamer
 // @route   POST /api/auth/register
@@ -35,6 +36,7 @@ const registerUser = asyncHandler(async (req, res) => {
     displayName,
     email,
     passwordHash: password, // Pass plain password, it will be hashed
+    authProvider: "local",
     // Add default values if needed, uniqueAlertToken is generated automatically
   });
 
@@ -56,6 +58,7 @@ const registerUser = asyncHandler(async (req, res) => {
       alertSoundUrl: user.alertSoundUrl,
       uniqueAlertToken: user.uniqueAlertToken,
       createdAt: user.createdAt,
+      authProvider: user.authProvider,
       token: token, // Send token to the client
     });
   } else {
@@ -99,11 +102,101 @@ const loginUser = asyncHandler(async (req, res) => {
       alertSoundUrl: user.alertSoundUrl,
       uniqueAlertToken: user.uniqueAlertToken,
       createdAt: user.createdAt,
+      authProvider: user.authProvider,
       token: token, // Send token
     });
   } else {
     res.status(401); // Unauthorized
     throw new Error("Invalid email or password");
+  }
+});
+
+// @desc    Google Authentication (Login/Register)
+// @route   POST /api/auth/google
+// @access  Public
+const googleAuth = asyncHandler(async (req, res) => {
+  const { idToken } = req.body;
+
+  if (!idToken) {
+    res.status(400);
+    throw new Error("Google ID token is required");
+  }
+
+  try {
+    // Verify the Google token
+    const googleUser = await verifyGoogleToken(idToken);
+
+    // Check if user exists with this Google ID
+    let user = await User.findOne({ googleId: googleUser.googleId });
+
+    // If user doesn't exist with googleId, check by email
+    if (!user) {
+      user = await User.findOne({ email: googleUser.email });
+
+      // If user exists by email but no googleId, update the user
+      if (user) {
+        user.googleId = googleUser.googleId;
+        user.authProvider = "google";
+
+        // Update avatar if user doesn't have one
+        if (!user.avatarUrl && googleUser.avatarUrl) {
+          user.avatarUrl = googleUser.avatarUrl;
+        }
+
+        await user.save();
+      } else {
+        // Create a new user with Google data
+        // Generate a unique username based on email or display name
+        const baseUsername = googleUser.email.split("@")[0].toLowerCase();
+        let username = baseUsername;
+        let usernameExists = true;
+        let counter = 1;
+
+        // Find a unique username
+        while (usernameExists) {
+          const existingUser = await User.findOne({ username });
+          if (!existingUser) {
+            usernameExists = false;
+          } else {
+            username = `${baseUsername}${counter}`;
+            counter++;
+          }
+        }
+
+        user = await User.create({
+          username,
+          displayName: googleUser.displayName,
+          email: googleUser.email,
+          googleId: googleUser.googleId,
+          avatarUrl: googleUser.avatarUrl || "",
+          authProvider: "google",
+        });
+      }
+    }
+
+    // Generate token
+    const token = generateToken(user._id);
+
+    // Return user data with token
+    res.json({
+      _id: user._id,
+      username: user.username,
+      displayName: user.displayName,
+      email: user.email,
+      avatarUrl: user.avatarUrl,
+      coverImageUrl: user.coverImageUrl,
+      bio: user.bio,
+      socialLinks: user.socialLinks,
+      alertTheme: user.alertTheme,
+      alertSoundUrl: user.alertSoundUrl,
+      uniqueAlertToken: user.uniqueAlertToken,
+      authProvider: user.authProvider,
+      createdAt: user.createdAt,
+      token: token,
+    });
+  } catch (error) {
+    res.status(401);
+    throw new Error(`Google authentication failed: ${error.message}`);
   }
 });
 
@@ -141,6 +234,7 @@ const getMe = asyncHandler(async (req, res) => {
       alertTheme: user.alertTheme,
       alertSoundUrl: user.alertSoundUrl,
       uniqueAlertToken: user.uniqueAlertToken,
+      authProvider: user.authProvider,
       createdAt: user.createdAt,
     });
   } else {
@@ -154,4 +248,5 @@ module.exports = {
   loginUser,
   logoutUser,
   getMe,
+  googleAuth,
 };
